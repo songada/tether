@@ -1,0 +1,14 @@
+{
+  "name": "tether-ftp",
+  "version": "1.0.0",
+  "description": "Anonymous FTP server",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "web": "node web.js"
+  },
+  "dependencies": {
+    "express": "^4.21.1",
+    "ftp-srv": "^4.6.3"
+  }
+}
