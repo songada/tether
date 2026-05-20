@@ -4,11 +4,15 @@
   "description": "Anonymous FTP server",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
+    "start": "concurrently -n ftp,web -c blue,green \"node server.js\" \"node web.js\"",
+    "ftp": "node server.js",
     "web": "node web.js"
   },
   "dependencies": {
     "express": "^4.21.1",
     "ftp-srv": "^4.6.3"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
   }
 }
