@@ -59,9 +59,12 @@ app.get('/', (_req, res) => {
   <style>
     html, body { margin: 0; height: 100%; background: #000; color: #ddd; font: 14px/1.4 system-ui, sans-serif; user-select: none; }
     #wrap { position: fixed; inset: 0; display: grid; place-items: center; }
-    #img { max-width: 100%; max-height: 100%; object-fit: contain; }
+    #img { max-width: 100%; max-height: 100%; object-fit: contain; transition: transform .2s; }
+    #img.rot90 { transform: rotate(90deg); max-width: 100vh; max-height: 100vw; }
     #meta { position: fixed; left: 12px; bottom: 12px; padding: 6px 10px; background: rgba(0,0,0,.5); border-radius: 6px; }
     #counter { position: fixed; right: 12px; top: 12px; padding: 6px 10px; background: rgba(0,0,0,.5); border-radius: 6px; font-variant-numeric: tabular-nums; }
+    #rotate { position: fixed; right: 12px; bottom: 12px; padding: 6px 12px; background: rgba(0,0,0,.5); border: none; border-radius: 6px; color: #ddd; font: inherit; cursor: pointer; }
+    #rotate:hover { background: rgba(0,0,0,.75); }
     #empty { opacity: .6; }
     .nav { position: fixed; top: 0; bottom: 0; width: 18%; display: grid; place-items: center; cursor: pointer; opacity: 0; transition: opacity .15s; font-size: 48px; color: #fff; background: linear-gradient(to right, rgba(0,0,0,.4), transparent); }
     .nav.right { right: 0; background: linear-gradient(to left, rgba(0,0,0,.4), transparent); }
@@ -78,6 +81,7 @@ app.get('/', (_req, res) => {
   <div id="next" class="nav right" title="Next (→)">→</div>
   <div id="counter"></div>
   <div id="meta"></div>
+  <button id="rotate" title="Rotate (R)">↻ rotate</button>
   <script>
     const img = document.getElementById('img');
     const empty = document.getElementById('empty');
@@ -140,14 +144,19 @@ app.get('/', (_req, res) => {
       }
     }
 
+    const rotateBtn = document.getElementById('rotate');
+    function toggleRotate() { img.classList.toggle('rot90'); }
+
     document.addEventListener('keydown', (e) => {
       if (e.key === 'ArrowLeft') { go(-1); e.preventDefault(); }
       else if (e.key === 'ArrowRight') { go(1); e.preventDefault(); }
       else if (e.key === 'Home') { index = 0; followLatest = false; render(); }
       else if (e.key === 'End') { followLatest = true; index = images.length - 1; render(); }
+      else if (e.key === 'r' || e.key === 'R') { toggleRotate(); }
     });
     prevBtn.addEventListener('click', () => go(-1));
     nextBtn.addEventListener('click', () => go(1));
+    rotateBtn.addEventListener('click', toggleRotate);
 
     img.addEventListener('error', () => {
       if (img.dataset.retried) return;
