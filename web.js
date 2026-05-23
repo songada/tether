@@ -11,11 +11,31 @@ const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.
 fs.mkdirSync(ROOT, { recursive: true });
 fs.mkdirSync(GALLERIES_ROOT, { recursive: true });
 
-const cleared = fs.readdirSync(ROOT);
-for (const name of cleared) {
-  fs.rmSync(path.join(ROOT, name), { recursive: true, force: true });
+const STALE_AGE_MS = 2 * 60 * 60 * 1000;
+
+function latestMtime(dir) {
+  let latest = 0;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    const mtime = entry.isDirectory() ? latestMtime(full) : fs.statSync(full).mtimeMs;
+    if (mtime > latest) latest = mtime;
+  }
+  return latest;
 }
-console.log(`Cleared ${cleared.length} item(s) from upload folder: ${ROOT}`);
+
+const top = fs.readdirSync(ROOT);
+if (top.length === 0) {
+  console.log(`Upload folder is empty: ${ROOT}`);
+} else {
+  const newest = latestMtime(ROOT);
+  const ageMs = Date.now() - newest;
+  if (ageMs > STALE_AGE_MS) {
+    for (const name of top) fs.rmSync(path.join(ROOT, name), { recursive: true, force: true });
+    console.log(`Cleared ${top.length} item(s) from upload folder (last upload was ${Math.round(ageMs/60000)} min ago)`);
+  } else {
+    console.log(`Kept ${top.length} item(s) in upload folder (last upload was ${Math.round(ageMs/60000)} min ago, under 2h threshold)`);
+  }
+}
 
 const STABLE_AGE_MS = 1000;
 const UPLOADED_ID = 'uploaded';
@@ -34,22 +54,25 @@ function findSource(id) {
 
 function listImages(rootDir) {
   const out = [];
+  let uploading = 0;
   const cutoff = Date.now() - STABLE_AGE_MS;
   const walk = (dir) => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         walk(full);
-      } else if (entry.isFile() && IMAGE_EXTS.has(path.extname(entry.name).toLowerCase())) {
+      } else if (entry.isFile()) {
+        const ext = path.extname(entry.name).toLowerCase();
+        if (!IMAGE_EXTS.has(ext)) continue;
         const { mtimeMs, size } = fs.statSync(full);
-        if (mtimeMs > cutoff) continue;
+        if (mtimeMs > cutoff) { uploading++; continue; }
         out.push({ name: path.relative(rootDir, full), mtime: Math.floor(mtimeMs), size });
       }
     }
   };
   walk(rootDir);
   out.sort((a, b) => a.mtime - b.mtime);
-  return out;
+  return { images: out, uploading };
 }
 
 function resolveSafe(rootDir, name) {
@@ -67,7 +90,8 @@ app.get('/sources.json', (_req, res) => {
 app.get('/list.json', (req, res) => {
   const source = findSource(req.query.source);
   if (!source) return res.status(404).json({ error: 'unknown source' });
-  res.json({ source: source.id, images: listImages(source.root) });
+  const { images, uploading } = listImages(source.root);
+  res.json({ source: source.id, images, uploading });
 });
 
 app.get('/image', (req, res) => {
@@ -112,6 +136,10 @@ app.get('/', (_req, res) => {
     .nav:hover { opacity: 1; }
     .nav[hidden] { display: none; }
     #keylog { position: fixed; left: 50%; bottom: 12px; transform: translateX(-50%); padding: 6px 12px; background: rgba(0,0,0,.6); border-radius: 6px; font-family: ui-monospace, monospace; pointer-events: none; z-index: 10; }
+    #uploading { position: fixed; left: 50%; top: 12px; transform: translateX(-50%); padding: 6px 12px; background: rgba(0,0,0,.6); border-radius: 6px; z-index: 10; display: none; align-items: center; gap: 8px; }
+    #uploading.show { display: flex; }
+    #uploading .spinner { width: 14px; height: 14px; border: 2px solid rgba(255,255,255,.25); border-top-color: #fff; border-radius: 50%; animation: spin .8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
     #confirm { position: fixed; inset: 0; background: rgba(0,0,0,.75); display: none; place-items: center; z-index: 100; }
     #confirm.show { display: grid; }
     #confirm .box { background: #222; color: #fff; padding: 28px 36px; border-radius: 10px; text-align: center; font-size: 18px; min-width: 280px; }
@@ -130,6 +158,7 @@ app.get('/', (_req, res) => {
   <div id="meta"></div>
   <button id="rotate" title="Rotate (Tab)">↻ rotate</button>
   <div id="keylog"></div>
+  <div id="uploading"><div class="spinner"></div><span id="uploadingText">uploading...</span></div>
   <div id="confirm"><div class="box">Confirm to shutdown<div class="hint">press <b>B</b> again to shutdown, <b>Esc</b> to cancel</div></div></div>
   <script>
     const img = document.getElementById('img');
@@ -194,10 +223,19 @@ app.get('/', (_req, res) => {
       } catch (e) { /* ignore */ }
     }
 
+    const uploadingEl = document.getElementById('uploading');
+    const uploadingText = document.getElementById('uploadingText');
+
     async function refresh() {
       try {
         const r = await fetch('/list.json?source=' + encodeURIComponent(curSource().id), { cache: 'no-store' });
-        const { images: list } = await r.json();
+        const { images: list, uploading = 0 } = await r.json();
+        if (uploading > 0) {
+          uploadingText.textContent = uploading > 1 ? 'uploading ' + uploading + ' files...' : 'uploading...';
+          uploadingEl.classList.add('show');
+        } else {
+          uploadingEl.classList.remove('show');
+        }
         const currentName = images[index]?.name;
         images = list;
         if (followLatest || !currentName) {
@@ -249,7 +287,7 @@ app.get('/', (_req, res) => {
       }
       if (e.key === 'PageUp') { go(-1); e.preventDefault(); }
       else if (e.key === 'PageDown') { go(1); e.preventDefault(); }
-      else if (e.key === 'Alt' && !e.repeat) { switchSource(); e.preventDefault(); }
+      else if (e.key === 'Escape') { switchSource(); e.preventDefault(); }
       else if (e.key === 'Tab' && !e.repeat) { toggleRotate(); e.preventDefault(); }
       else if (e.key === 'Home') { index = 0; followLatest = false; render(); }
       else if (e.key === 'End') { followLatest = true; index = images.length - 1; render(); }
