@@ -128,6 +128,8 @@ app.get('/', (_req, res) => {
     #img.rot90 { width: 100vh; height: 100vw; transform: translate(-50%, -50%) rotate(270deg); }
     #meta { position: fixed; left: 12px; bottom: 12px; padding: 6px 10px; background: rgba(0,0,0,.5); border-radius: 6px; z-index: 10; }
     #counter { position: fixed; right: 12px; bottom: 12px; padding: 6px 10px; background: rgba(0,0,0,.5); border-radius: 6px; font-variant-numeric: tabular-nums; z-index: 10; }
+    #rotate { position: fixed; right: 12px; bottom: 48px; padding: 6px 12px; background: rgba(0,0,0,.5); border: none; border-radius: 6px; color: #ddd; font: inherit; cursor: pointer; z-index: 10; }
+    #rotate:hover { background: rgba(0,0,0,.75); }
     #empty { opacity: .6; }
     .nav { position: fixed; top: 0; bottom: 0; width: 18%; display: grid; place-items: center; cursor: pointer; opacity: 0; transition: opacity .15s; font-size: 48px; color: #fff; background: linear-gradient(to right, rgba(0,0,0,.4), transparent); z-index: 5; }
     .nav.right { right: 0; background: linear-gradient(to left, rgba(0,0,0,.4), transparent); }
@@ -154,6 +156,7 @@ app.get('/', (_req, res) => {
   <div id="next" class="nav right" title="Next (PageDown)">→</div>
   <div id="counter"></div>
   <div id="meta"></div>
+  <button id="rotate" title="Rotate (Tab)">↻ rotate</button>
   <div id="keylog"></div>
   <div id="uploading"><div class="spinner"></div><span id="uploadingText">uploading...</span></div>
   <div id="confirm"><div class="box">Confirm to shutdown<div class="hint">press <b>Esc</b> again to shutdown, <b>B</b> to cancel</div></div></div>
@@ -309,6 +312,7 @@ app.get('/', (_req, res) => {
     });
     prevBtn.addEventListener('click', () => go(-1));
     nextBtn.addEventListener('click', () => go(1));
+    document.getElementById('rotate').addEventListener('click', toggleRotate);
 
     img.addEventListener('error', () => {
       if (img.dataset.retried) return;
