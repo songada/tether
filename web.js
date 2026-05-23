@@ -122,24 +122,22 @@ app.get('/', (_req, res) => {
   <meta charset="utf-8">
   <title>Pictures</title>
   <style>
-    html, body { margin: 0; height: 100%; background: #000; color: #ddd; font: 14px/1.4 system-ui, sans-serif; user-select: none; }
-    #wrap { position: fixed; inset: 0; display: grid; place-items: center; }
-    #img { max-width: 100%; max-height: 100%; object-fit: contain; transition: transform .2s; }
-    #img.rot90 { transform: rotate(90deg); max-width: 100vh; max-height: 100vw; }
-    #source { position: fixed; left: 12px; top: 12px; padding: 6px 10px; background: rgba(0,0,0,.5); border-radius: 6px; z-index: 10; font-weight: 600; }
+    html, body { margin: 0; height: 100%; background: #000; color: #ddd; font: 14px/1.4 system-ui, sans-serif; user-select: none; overflow: hidden; }
+    #wrap { position: fixed; inset: 0; }
+    #img { position: absolute; top: 50%; left: 50%; width: 100vw; height: 100vh; object-fit: contain; transform: translate(-50%, -50%); transition: transform .2s; }
+    #img.rot90 { width: 100vh; height: 100vw; transform: translate(-50%, -50%) rotate(90deg); }
     #meta { position: fixed; left: 12px; bottom: 12px; padding: 6px 10px; background: rgba(0,0,0,.5); border-radius: 6px; z-index: 10; }
-    #counter { position: fixed; right: 12px; top: 12px; padding: 6px 10px; background: rgba(0,0,0,.5); border-radius: 6px; font-variant-numeric: tabular-nums; z-index: 10; }
-    #rotate { position: fixed; right: 12px; bottom: 12px; padding: 6px 12px; background: rgba(0,0,0,.5); border: none; border-radius: 6px; color: #ddd; font: inherit; cursor: pointer; z-index: 10; }
-    #rotate:hover { background: rgba(0,0,0,.75); }
+    #counter { position: fixed; right: 12px; bottom: 12px; padding: 6px 10px; background: rgba(0,0,0,.5); border-radius: 6px; font-variant-numeric: tabular-nums; z-index: 10; }
     #empty { opacity: .6; }
     .nav { position: fixed; top: 0; bottom: 0; width: 18%; display: grid; place-items: center; cursor: pointer; opacity: 0; transition: opacity .15s; font-size: 48px; color: #fff; background: linear-gradient(to right, rgba(0,0,0,.4), transparent); z-index: 5; }
     .nav.right { right: 0; background: linear-gradient(to left, rgba(0,0,0,.4), transparent); }
     .nav:hover { opacity: 1; }
     .nav[hidden] { display: none; }
     #keylog { position: fixed; left: 50%; bottom: 12px; transform: translateX(-50%); padding: 6px 12px; background: rgba(0,0,0,.6); border-radius: 6px; font-family: ui-monospace, monospace; pointer-events: none; z-index: 10; }
-    #uploading { position: fixed; left: 50%; top: 12px; transform: translateX(-50%); padding: 6px 12px; background: rgba(0,0,0,.6); border-radius: 6px; z-index: 10; display: none; align-items: center; gap: 8px; }
+    #uploading { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 28px 36px; background: rgba(0,0,0,.7); border-radius: 14px; z-index: 20; display: none; flex-direction: column; align-items: center; gap: 18px; }
     #uploading.show { display: flex; }
-    #uploading .spinner { width: 14px; height: 14px; border: 2px solid rgba(255,255,255,.25); border-top-color: #fff; border-radius: 50%; animation: spin .8s linear infinite; }
+    #uploading .spinner { width: 96px; height: 96px; border: 8px solid rgba(255,255,255,.2); border-top-color: #fff; border-radius: 50%; animation: spin .9s linear infinite; }
+    #uploadingText { font-size: 18px; }
     @keyframes spin { to { transform: rotate(360deg); } }
     #confirm { position: fixed; inset: 0; background: rgba(0,0,0,.75); display: none; place-items: center; z-index: 100; }
     #confirm.show { display: grid; }
@@ -154,21 +152,37 @@ app.get('/', (_req, res) => {
   </div>
   <div id="prev" class="nav left" title="Previous (PageUp)">←</div>
   <div id="next" class="nav right" title="Next (PageDown)">→</div>
-  <div id="source"></div>
   <div id="counter"></div>
   <div id="meta"></div>
-  <button id="rotate" title="Rotate (Tab)">↻ rotate</button>
   <div id="keylog"></div>
   <div id="uploading"><div class="spinner"></div><span id="uploadingText">uploading...</span></div>
-  <div id="confirm"><div class="box">Confirm to shutdown<div class="hint">press <b>B</b> again to shutdown, <b>Esc</b> to cancel</div></div></div>
+  <div id="confirm"><div class="box">Confirm to shutdown<div class="hint">press <b>Esc</b> again to shutdown, <b>B</b> to cancel</div></div></div>
   <script>
     const img = document.getElementById('img');
     const empty = document.getElementById('empty');
     const meta = document.getElementById('meta');
     const counter = document.getElementById('counter');
-    const sourceLabel = document.getElementById('source');
     const prevBtn = document.getElementById('prev');
     const nextBtn = document.getElementById('next');
+
+    function formatBytes(n) {
+      if (!n && n !== 0) return '';
+      if (n < 1024) return n + ' B';
+      if (n < 1024 * 1024) return (n / 1024).toFixed(0) + ' KB';
+      return (n / (1024 * 1024)).toFixed(1) + ' MB';
+    }
+
+    function updateMeta() {
+      const cur = images[index];
+      if (!cur) return;
+      const parts = [
+        cur.name,
+        new Date(cur.mtime).toLocaleString(),
+        formatBytes(cur.size),
+      ];
+      if (img.naturalWidth) parts.push(img.naturalWidth + '×' + img.naturalHeight + 'px');
+      meta.textContent = parts.join('  ·  ');
+    }
 
     let sources = [{ id: 'uploaded', label: 'Uploaded' }];
     let sourceIdx = 0;
@@ -179,7 +193,6 @@ app.get('/', (_req, res) => {
     function curSource() { return sources[sourceIdx]; }
 
     function render() {
-      sourceLabel.textContent = curSource().label + ' [' + (sourceIdx + 1) + '/' + sources.length + ']';
       if (images.length === 0) {
         img.hidden = true; empty.hidden = false;
         counter.textContent = '0 / 0';
@@ -197,7 +210,7 @@ app.get('/', (_req, res) => {
       }
       img.hidden = false; empty.hidden = true;
       counter.textContent = (index + 1) + ' / ' + images.length;
-      meta.textContent = cur.name + '  -  ' + new Date(cur.mtime).toLocaleString();
+      updateMeta();
       prevBtn.hidden = index === 0;
       nextBtn.hidden = index === images.length - 1;
     }
@@ -259,7 +272,6 @@ app.get('/', (_req, res) => {
       refresh();
     }
 
-    const rotateBtn = document.getElementById('rotate');
     function toggleRotate() { img.classList.toggle('rot90'); }
 
     const keylog = document.getElementById('keylog');
@@ -282,28 +294,28 @@ app.get('/', (_req, res) => {
     document.addEventListener('keydown', (e) => {
       showKey(e);
       if (confirming) {
-        if (e.key === 'b' || e.key === 'B') { doShutdown(); e.preventDefault(); }
-        else if (e.key === 'Escape') { closeConfirm(); e.preventDefault(); }
+        if (e.key === 'Escape') { doShutdown(); e.preventDefault(); }
+        else if (e.key === 'b' || e.key === 'B') { closeConfirm(); e.preventDefault(); }
         else { e.preventDefault(); }
         return;
       }
       if (e.key === 'PageUp') { go(-1); e.preventDefault(); }
       else if (e.key === 'PageDown') { go(1); e.preventDefault(); }
-      else if (e.key === 'Escape') { switchSource(); e.preventDefault(); }
+      else if ((e.key === 'b' || e.key === 'B') && !e.repeat) { switchSource(); e.preventDefault(); }
       else if (e.key === 'Tab' && !e.repeat) { toggleRotate(); e.preventDefault(); }
       else if (e.key === 'Home') { index = 0; followLatest = false; render(); }
       else if (e.key === 'End') { followLatest = true; index = images.length - 1; render(); }
-      else if ((e.key === 'b' || e.key === 'B') && !e.repeat) { openConfirm(); e.preventDefault(); }
+      else if (e.key === 'Escape' && !e.repeat) { openConfirm(); e.preventDefault(); }
     });
     prevBtn.addEventListener('click', () => go(-1));
     nextBtn.addEventListener('click', () => go(1));
-    rotateBtn.addEventListener('click', toggleRotate);
 
     img.addEventListener('error', () => {
       if (img.dataset.retried) return;
       img.dataset.retried = '1';
       setTimeout(() => { img.src = img.dataset.url + '&r=1'; }, 600);
     });
+    img.addEventListener('load', updateMeta);
 
     (async () => {
       await loadSources();
