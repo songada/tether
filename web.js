@@ -1,6 +1,7 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
+const { exec } = require('child_process');
 
 const PORT = process.env.WEB_PORT ? Number(process.env.WEB_PORT) : 3000;
 const ROOT = path.resolve(process.env.FTP_ROOT || './ftp-root');
@@ -9,6 +10,12 @@ const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.
 
 fs.mkdirSync(ROOT, { recursive: true });
 fs.mkdirSync(GALLERIES_ROOT, { recursive: true });
+
+const cleared = fs.readdirSync(ROOT);
+for (const name of cleared) {
+  fs.rmSync(path.join(ROOT, name), { recursive: true, force: true });
+}
+console.log(`Cleared ${cleared.length} item(s) from upload folder: ${ROOT}`);
 
 const STABLE_AGE_MS = 1000;
 const UPLOADED_ID = 'uploaded';
@@ -73,6 +80,16 @@ app.get('/image', (req, res) => {
   res.sendFile(full, { headers: { 'Cache-Control': 'no-store' }, etag: false, lastModified: false });
 });
 
+app.post('/shutdown', (_req, res) => {
+  console.log('[shutdown] requested via web');
+  res.json({ ok: true });
+  setTimeout(() => {
+    exec('sudo shutdown now', (err, stdout, stderr) => {
+      if (err) console.error('[shutdown] failed:', err.message, stderr);
+    });
+  }, 100);
+});
+
 app.get('/', (_req, res) => {
   res.type('html').send(`<!doctype html>
 <html lang="en">
@@ -94,6 +111,11 @@ app.get('/', (_req, res) => {
     .nav.right { right: 0; background: linear-gradient(to left, rgba(0,0,0,.4), transparent); }
     .nav:hover { opacity: 1; }
     .nav[hidden] { display: none; }
+    #keylog { position: fixed; left: 50%; bottom: 12px; transform: translateX(-50%); padding: 6px 12px; background: rgba(0,0,0,.6); border-radius: 6px; font-family: ui-monospace, monospace; pointer-events: none; z-index: 10; }
+    #confirm { position: fixed; inset: 0; background: rgba(0,0,0,.75); display: none; place-items: center; z-index: 100; }
+    #confirm.show { display: grid; }
+    #confirm .box { background: #222; color: #fff; padding: 28px 36px; border-radius: 10px; text-align: center; font-size: 18px; min-width: 280px; }
+    #confirm .hint { margin-top: 14px; opacity: .6; font-size: 13px; }
   </style>
 </head>
 <body>
@@ -101,12 +123,14 @@ app.get('/', (_req, res) => {
     <img id="img" alt="" hidden>
     <div id="empty" hidden>No images yet.</div>
   </div>
-  <div id="prev" class="nav left" title="Previous (←)">←</div>
-  <div id="next" class="nav right" title="Next (→)">→</div>
+  <div id="prev" class="nav left" title="Previous (PageUp)">←</div>
+  <div id="next" class="nav right" title="Next (PageDown)">→</div>
   <div id="source"></div>
   <div id="counter"></div>
   <div id="meta"></div>
-  <button id="rotate" title="Rotate (Shift)">↻ rotate</button>
+  <button id="rotate" title="Rotate (Tab)">↻ rotate</button>
+  <div id="keylog"></div>
+  <div id="confirm"><div class="box">Confirm to shutdown<div class="hint">press <b>B</b> again to shutdown, <b>Esc</b> to cancel</div></div></div>
   <script>
     const img = document.getElementById('img');
     const empty = document.getElementById('empty');
@@ -125,7 +149,7 @@ app.get('/', (_req, res) => {
     function curSource() { return sources[sourceIdx]; }
 
     function render() {
-      sourceLabel.textContent = curSource().label;
+      sourceLabel.textContent = curSource().label + ' [' + (sourceIdx + 1) + '/' + sources.length + ']';
       if (images.length === 0) {
         img.hidden = true; empty.hidden = false;
         counter.textContent = '0 / 0';
@@ -198,13 +222,38 @@ app.get('/', (_req, res) => {
     const rotateBtn = document.getElementById('rotate');
     function toggleRotate() { img.classList.toggle('rot90'); }
 
+    const keylog = document.getElementById('keylog');
+    keylog.textContent = 'press any key';
+    function showKey(e) {
+      keylog.textContent = 'key: ' + e.key + '  code: ' + e.code + '  keyCode: ' + e.keyCode;
+    }
+
+    const confirmEl = document.getElementById('confirm');
+    let confirming = false;
+    function openConfirm() { confirming = true; confirmEl.classList.add('show'); }
+    function closeConfirm() { confirming = false; confirmEl.classList.remove('show'); }
+    async function doShutdown() {
+      closeConfirm();
+      keylog.textContent = 'shutting down...';
+      try { await fetch('/shutdown', { method: 'POST' }); }
+      catch (e) { /* connection will likely drop */ }
+    }
+
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'ArrowLeft') { go(-1); e.preventDefault(); }
-      else if (e.key === 'ArrowRight') { go(1); e.preventDefault(); }
-      else if (e.key === 'ArrowUp') { switchSource(); e.preventDefault(); }
+      showKey(e);
+      if (confirming) {
+        if (e.key === 'b' || e.key === 'B') { doShutdown(); e.preventDefault(); }
+        else if (e.key === 'Escape') { closeConfirm(); e.preventDefault(); }
+        else { e.preventDefault(); }
+        return;
+      }
+      if (e.key === 'PageUp') { go(-1); e.preventDefault(); }
+      else if (e.key === 'PageDown') { go(1); e.preventDefault(); }
+      else if (e.key === 'Alt' && !e.repeat) { switchSource(); e.preventDefault(); }
+      else if (e.key === 'Tab' && !e.repeat) { toggleRotate(); e.preventDefault(); }
       else if (e.key === 'Home') { index = 0; followLatest = false; render(); }
       else if (e.key === 'End') { followLatest = true; index = images.length - 1; render(); }
-      else if (e.key === 'Shift' && !e.repeat) { toggleRotate(); }
+      else if ((e.key === 'b' || e.key === 'B') && !e.repeat) { openConfirm(); e.preventDefault(); }
     });
     prevBtn.addEventListener('click', () => go(-1));
     nextBtn.addEventListener('click', () => go(1));
