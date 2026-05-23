@@ -115,6 +115,7 @@ app.post('/shutdown', (_req, res) => {
 });
 
 app.get('/', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
   res.type('html').send(`<!doctype html>
 <html lang="en">
 <head>
@@ -250,7 +251,8 @@ app.get('/', (_req, res) => {
       }
     }
 
-    function switchSource() {
+    async function switchSource() {
+      await loadSources();
       sourceIdx = (sourceIdx + 1) % sources.length;
       images = []; index = -1; followLatest = true;
       render();
