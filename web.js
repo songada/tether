@@ -275,7 +275,11 @@ app.get('/', (_req, res) => {
       refresh();
     }
 
-    function toggleRotate() { img.classList.toggle('rot90'); }
+    if (localStorage.getItem('rot90') === '1') img.classList.add('rot90');
+    function toggleRotate() {
+      img.classList.toggle('rot90');
+      localStorage.setItem('rot90', img.classList.contains('rot90') ? '1' : '0');
+    }
 
     const keylog = document.getElementById('keylog');
     keylog.textContent = 'press any key';
