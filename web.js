@@ -125,7 +125,7 @@ app.get('/', (_req, res) => {
     html, body { margin: 0; height: 100%; background: #000; color: #ddd; font: 14px/1.4 system-ui, sans-serif; user-select: none; overflow: hidden; }
     #wrap { position: fixed; inset: 0; }
     #img { position: absolute; top: 50%; left: 50%; width: 100vw; height: 100vh; object-fit: contain; transform: translate(-50%, -50%); transition: transform .2s; }
-    #img.rot90 { width: 100vh; height: 100vw; transform: translate(-50%, -50%) rotate(90deg); }
+    #img.rot90 { width: 100vh; height: 100vw; transform: translate(-50%, -50%) rotate(270deg); }
     #meta { position: fixed; left: 12px; bottom: 12px; padding: 6px 10px; background: rgba(0,0,0,.5); border-radius: 6px; z-index: 10; }
     #counter { position: fixed; right: 12px; bottom: 12px; padding: 6px 10px; background: rgba(0,0,0,.5); border-radius: 6px; font-variant-numeric: tabular-nums; z-index: 10; }
     #empty { opacity: .6; }
