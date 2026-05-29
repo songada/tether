@@ -141,9 +141,21 @@ app.get('/', (_req, res) => {
     #uploading .spinner { width: 96px; height: 96px; border: 8px solid rgba(255,255,255,.2); border-top-color: #fff; border-radius: 50%; animation: spin .9s linear infinite; }
     #uploadingText { font-size: 18px; }
     @keyframes spin { to { transform: rotate(360deg); } }
-    #confirm { position: fixed; inset: 0; background: rgba(0,0,0,.75); display: none; place-items: center; z-index: 100; }
-    #confirm.show { display: grid; }
-    #confirm .box { background: #222; color: #fff; padding: 28px 36px; border-radius: 10px; text-align: center; font-size: 18px; min-width: 280px; }
+    #grid { position: fixed; inset: 0; display: grid; gap: 4px; padding: 4px; box-sizing: border-box; background: #000; }
+    #grid[hidden] { display: none; }
+    #dir[hidden] { display: none; }
+    #grid.s3 { grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); }
+    #grid.s5 { grid-template-columns: repeat(5, 1fr); grid-template-rows: repeat(5, 1fr); }
+    #grid.s7 { grid-template-columns: repeat(7, 1fr); grid-template-rows: repeat(7, 1fr); }
+    #grid > img { width: 100%; height: 100%; min-width: 0; min-height: 0; object-fit: contain; background: #111; display: block; }
+    #dir { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; gap: 16px; padding: 32px; flex-wrap: wrap; }
+    #dir .item { padding: 20px 28px; font-size: 22px; border: 2px solid #333; border-radius: 12px; color: #ddd; min-width: 140px; text-align: center; }
+    #dir .item.active { border-color: #fff; background: #2a2a2a; transform: scale(1.06); }
+    #dir .item.shutdown { color: #f99; border-color: #844; }
+    #dir .item.shutdown.active { background: #4a1a1a; border-color: #f44; }
+    #confirm { position: fixed; inset: 0; background: rgba(0,0,0,.85); display: grid; place-items: center; z-index: 100; }
+    #confirm[hidden] { display: none; }
+    #confirm .box { background: #222; color: #fff; padding: 28px 36px; border-radius: 12px; text-align: center; font-size: 20px; min-width: 280px; }
     #confirm .hint { margin-top: 14px; opacity: .6; font-size: 13px; }
   </style>
 </head>
@@ -159,7 +171,9 @@ app.get('/', (_req, res) => {
   <button id="rotate" title="Rotate (Tab)">↻ rotate</button>
   <div id="keylog"></div>
   <div id="uploading"><div class="spinner"></div><span id="uploadingText">uploading...</span></div>
-  <div id="confirm"><div class="box">Confirm to shutdown<div class="hint">press <b>Esc</b> again to shutdown, <b>B</b> to cancel</div></div></div>
+  <div id="grid" hidden></div>
+  <div id="dir" hidden></div>
+  <div id="confirm" hidden><div class="box">Confirm shutdown<div class="hint">press <b>Tab</b> to confirm, <b>B</b> to cancel</div></div></div>
   <script>
     const img = document.getElementById('img');
     const empty = document.getElementById('empty');
@@ -236,6 +250,7 @@ app.get('/', (_req, res) => {
           sources = list;
           const keep = sources.findIndex(s => s.id === prevId);
           sourceIdx = keep >= 0 ? keep : 0;
+          if (mode === 'dir') renderDir();
         }
       } catch (e) { /* ignore */ }
     }
@@ -261,18 +276,102 @@ app.get('/', (_req, res) => {
           const found = images.findIndex(i => i.name === currentName);
           index = found >= 0 ? found : images.length - 1;
         }
-        render();
+        if (mode === 'focus') render();
+        else if (mode === 'grid') renderGrid();
       } catch (e) {
         meta.textContent = 'error: ' + e.message;
       }
     }
 
-    async function switchSource() {
-      await loadSources();
-      sourceIdx = (sourceIdx + 1) % sources.length;
+    const wrap = document.getElementById('wrap');
+    const gridEl = document.getElementById('grid');
+    const dirEl = document.getElementById('dir');
+    const confirmEl = document.getElementById('confirm');
+    const rotateBtn = document.getElementById('rotate');
+
+    let mode = 'focus';
+    const GRID_SIZES = [9, 25, 49];
+    let gridLevel = 0;
+    let gridPage = 0;
+    let dirItems = [];
+    let dirIdx = 0;
+    let confirming = false;
+
+    function applyModeVisibility() {
+      wrap.hidden = mode !== 'focus';
+      gridEl.hidden = mode !== 'grid';
+      dirEl.hidden = mode !== 'dir';
+      const showFocusChrome = mode === 'focus';
+      meta.style.display = showFocusChrome ? '' : 'none';
+      rotateBtn.style.display = showFocusChrome ? '' : 'none';
+      prevBtn.style.display = showFocusChrome ? '' : 'none';
+      nextBtn.style.display = showFocusChrome ? '' : 'none';
+    }
+
+    let gridSig = '';
+    function renderGrid() {
+      const size = GRID_SIZES[gridLevel];
+      const side = Math.sqrt(size);
+      const totalPages = Math.max(1, Math.ceil(images.length / size));
+      if (gridPage >= totalPages) gridPage = totalPages - 1;
+      if (gridPage < 0) gridPage = 0;
+      const start = gridPage * size;
+      const slice = images.slice(start, start + size);
+      const sig = size + '|' + curSource().id + '|' + slice.map(im => im.name + ':' + im.mtime).join(',');
+      counter.textContent = 'page ' + (gridPage + 1) + ' / ' + totalPages + '  ·  ' + size + ' per page';
+      if (sig === gridSig) return;
+      gridSig = sig;
+      gridEl.className = 's' + side;
+      gridEl.innerHTML = '';
+      for (const im of slice) {
+        const el = document.createElement('img');
+        el.src = '/image?source=' + encodeURIComponent(curSource().id) + '&name=' + encodeURIComponent(im.name) + '&t=' + im.mtime;
+        gridEl.appendChild(el);
+      }
+    }
+
+    function renderDir() {
+      dirItems = [
+        ...sources.map(s => ({ id: s.id, label: s.label, type: 'source' })),
+        { id: '__shutdown', label: 'Shutdown', type: 'shutdown' },
+      ];
+      if (dirIdx >= dirItems.length) dirIdx = 0;
+      if (dirIdx < 0) dirIdx = dirItems.length - 1;
+      dirEl.innerHTML = '';
+      dirItems.forEach((item, i) => {
+        const el = document.createElement('div');
+        el.className = 'item' + (i === dirIdx ? ' active' : '') + (item.type === 'shutdown' ? ' shutdown' : '');
+        el.textContent = item.label;
+        dirEl.appendChild(el);
+      });
+      counter.textContent = (dirIdx + 1) + ' / ' + dirItems.length;
+    }
+
+    function setMode(m) {
+      mode = m;
+      applyModeVisibility();
+      if (m === 'focus') render();
+      else if (m === 'grid') renderGrid();
+      else if (m === 'dir') renderDir();
+    }
+
+    function openConfirm() { confirming = true; confirmEl.hidden = false; }
+    function closeConfirm() { confirming = false; confirmEl.hidden = true; }
+    async function doShutdown() {
+      closeConfirm();
+      keylog.textContent = 'shutting down...';
+      try { await fetch('/shutdown', { method: 'POST' }); } catch (e) { /* connection will drop */ }
+    }
+
+    async function selectDirItem() {
+      const item = dirItems[dirIdx];
+      if (!item) return;
+      if (item.type === 'shutdown') { openConfirm(); return; }
+      sourceIdx = sources.findIndex(s => s.id === item.id);
+      if (sourceIdx < 0) sourceIdx = 0;
       images = []; index = -1; followLatest = true;
-      render();
-      refresh();
+      setMode('focus');
+      await refresh();
     }
 
     if (localStorage.getItem('rot90') === '1') img.classList.add('rot90');
@@ -282,37 +381,95 @@ app.get('/', (_req, res) => {
     }
 
     const keylog = document.getElementById('keylog');
-    keylog.textContent = 'press any key';
+    const history = [];
+    function pushLog(label) {
+      history.push(label);
+      if (history.length > 10) history.shift();
+      keylog.textContent = history.join('  ');
+    }
+    pushLog('press any key or click');
+    history.length = 0;
     function showKey(e) {
-      keylog.textContent = 'key: ' + e.key + '  code: ' + e.code + '  keyCode: ' + e.keyCode;
+      pushLog(e.code || e.key);
     }
+    const MOUSE_BUTTONS = ['MouseL', 'MouseM', 'MouseR', 'Mouse4', 'Mouse5'];
+    function showMouse(e) {
+      pushLog(MOUSE_BUTTONS[e.button] || ('Mouse' + e.button));
+    }
+    document.addEventListener('mousedown', showMouse);
+    document.addEventListener('contextmenu', (e) => e.preventDefault());
 
-    const confirmEl = document.getElementById('confirm');
-    let confirming = false;
-    function openConfirm() { confirming = true; confirmEl.classList.add('show'); }
-    function closeConfirm() { confirming = false; confirmEl.classList.remove('show'); }
-    async function doShutdown() {
-      closeConfirm();
-      keylog.textContent = 'shutting down...';
-      try { await fetch('/shutdown', { method: 'POST' }); }
-      catch (e) { /* connection will likely drop */ }
-    }
+    const LEFT_KEYS = new Set(['PageUp', 'ArrowLeft']);
+    const RIGHT_KEYS = new Set(['PageDown', 'ArrowRight']);
 
     document.addEventListener('keydown', (e) => {
-      showKey(e);
+      const isEsc = e.code === 'Escape' || e.code === 'KeyP';
+      const isB = (e.key === 'b' || e.key === 'B');
+      const isTab = e.key === 'Tab';
+      const isLeft = LEFT_KEYS.has(e.key);
+      const isRight = RIGHT_KEYS.has(e.key);
+
+      if (isEsc) { pushLog('Escape'); e.preventDefault(); e.stopPropagation(); }
+      else if (e.code === 'MetaLeft') { showKey(e); e.preventDefault(); e.stopPropagation(); return; }
+      else { showKey(e); }
+
       if (confirming) {
-        if (e.key === 'Escape') { doShutdown(); e.preventDefault(); }
-        else if (e.key === 'b' || e.key === 'B') { closeConfirm(); e.preventDefault(); }
+        if (isTab && !e.repeat) { doShutdown(); e.preventDefault(); }
+        else if (isB && !e.repeat) { closeConfirm(); e.preventDefault(); }
         else { e.preventDefault(); }
         return;
       }
-      if (e.key === 'PageUp') { go(-1); e.preventDefault(); }
-      else if (e.key === 'PageDown') { go(1); e.preventDefault(); }
-      else if ((e.key === 'b' || e.key === 'B') && !e.repeat) { switchSource(); e.preventDefault(); }
-      else if (e.key === 'Tab' && !e.repeat) { toggleRotate(); e.preventDefault(); }
-      else if (e.key === 'Home') { index = 0; followLatest = false; render(); }
-      else if (e.key === 'End') { followLatest = true; index = images.length - 1; render(); }
-      else if (e.key === 'Escape' && !e.repeat) { openConfirm(); e.preventDefault(); }
+
+      if (mode === 'focus') {
+        if (isLeft) { go(-1); e.preventDefault(); }
+        else if (isRight) { go(1); e.preventDefault(); }
+        else if (isTab && !e.repeat) { toggleRotate(); e.preventDefault(); }
+        else if (isEsc && !e.repeat) {
+          gridLevel = 0;
+          gridPage = images.length > 0 ? Math.floor(Math.max(0, index) / GRID_SIZES[gridLevel]) : 0;
+          setMode('grid');
+        }
+        else if (isB && !e.repeat) {
+          dirIdx = Math.max(0, sources.findIndex(s => s.id === curSource().id));
+          setMode('dir');
+          e.preventDefault();
+        }
+      } else if (mode === 'grid') {
+        if (isLeft) {
+          if (gridPage > 0) { gridPage--; renderGrid(); }
+          e.preventDefault();
+        } else if (isRight) {
+          const size = GRID_SIZES[gridLevel];
+          const totalPages = Math.max(1, Math.ceil(images.length / size));
+          if (gridPage < totalPages - 1) { gridPage++; renderGrid(); }
+          e.preventDefault();
+        } else if (isEsc && !e.repeat) {
+          if (gridLevel < GRID_SIZES.length - 1) { gridLevel++; gridPage = 0; renderGrid(); }
+        } else if (isB && !e.repeat) {
+          if (gridLevel > 0) { gridLevel--; gridPage = 0; renderGrid(); }
+          else {
+            const size = GRID_SIZES[gridLevel];
+            const lastOnPage = Math.min(images.length - 1, gridPage * size + size - 1);
+            index = Math.max(0, lastOnPage);
+            followLatest = (index === images.length - 1);
+            setMode('focus');
+          }
+          e.preventDefault();
+        }
+      } else if (mode === 'dir') {
+        if (isLeft) {
+          dirIdx = (dirIdx - 1 + dirItems.length) % dirItems.length;
+          renderDir();
+          e.preventDefault();
+        } else if (isRight) {
+          dirIdx = (dirIdx + 1) % dirItems.length;
+          renderDir();
+          e.preventDefault();
+        } else if (isTab && !e.repeat) {
+          selectDirItem();
+          e.preventDefault();
+        }
+      }
     });
     prevBtn.addEventListener('click', () => go(-1));
     nextBtn.addEventListener('click', () => go(1));
